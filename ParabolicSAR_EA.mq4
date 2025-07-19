@@ -1,29 +1,58 @@
 //+------------------------------------------------------------------+
 //|                                              ParabolicSAR_EA.mq4 |
-//|                             Copyright 2025, Votre Nom           |
+//|                             Copyright 2025, Hadry Gassama       |
 //|                                              http://www.mql5.com |
 //+------------------------------------------------------------------+
-#property copyright "2025, Votre Nom"
-#property link      "http://www.mql5.com"
-#property version   "1.00"
+#property copyright "2025, Hadry Gassama"
+#property link      "https://github.com/hadrygassama/Parabolic-SAR-Supertrend-Step-NEMA-Indicator"
+#property version   "2.00"
+#property description "Expert Advisor basé sur Parabolic SAR filtré par SuperTrend Histo"
+#property description "Stratégie contrarian: SAR opposé à la tendance SuperTrend"
 #property strict
 
-//--- Input parameters
-input double InpSARStep = 0.02;        // Parabolic SAR Step
-input double InpSARMaximum = 0.2;      // Parabolic SAR Maximum
-input double InpLotSize = 0.1;         // Lot Size
+//=================================================================
+//                    PARAMETRES PARABOLIC SAR
+//=================================================================
+input string ________SAR_SETTINGS________ = "=== Paramètres Parabolic SAR ===";
+input double InpSARStep = 0.02;        // SAR Step
+input double InpSARMaximum = 0.2;      // SAR Maximum
+
+//=================================================================
+//                    PARAMETRES SUPERTREND HISTO
+//=================================================================
+input string ________SUPERTREND_SETTINGS________ = "=== Paramètres SuperTrend Histo ===";
+input bool   InpUseSuperTrendFilter = true;     // Utiliser le filtre SuperTrend
+input int    InpSuperTrendPeriod = 66;          // SuperTrend Period
+input double InpSuperTrendMultiplier = 2.236;   // SuperTrend Multiplier
+input int    InpMidPricePeriod = 10;            // Mid Price Period
+
+//=================================================================
+//                    GESTION DES POSITIONS
+//=================================================================
+input string ________POSITION_MANAGEMENT________ = "=== Gestion des Positions ===";
+input double InpLotSize = 0.1;         // Taille des Lots
 input int    InpMagicNumber = 12345;   // Magic Number
-input int    InpSlippage = 3;          // Slippage
-input bool   InpUseStopLoss = false;    // Use Stop Loss
-input bool   InpUseTakeProfit = false;  // Use Take Profit
+input int    InpSlippage = 3;          // Slippage (points)
+input bool   InpCloseOnOppositeSignal = true; // Fermer sur signal opposé
+
+//=================================================================
+//                    GESTION DES RISQUES
+//=================================================================
+input string ________RISK_MANAGEMENT________ = "=== Gestion des Risques ===";
+input bool   InpUseStopLoss = false;   // Utiliser Stop Loss
+input bool   InpUseTakeProfit = false; // Utiliser Take Profit
 input int    InpStopLoss = 50;         // Stop Loss (points)
 input int    InpTakeProfit = 100;      // Take Profit (points)
-input bool   InpTradeOnNewBar = true;  // Trade only on new bar
-input bool   InpCloseOnOppositeSignal = true; // Close trades on opposite signal
+
+//=================================================================
+//                    OPTIONS DE TRADING
+//=================================================================
+input string ________TRADING_OPTIONS________ = "=== Options de Trading ===";
+input bool   InpTradeOnNewBar = true;  // Trader sur nouvelle bougie uniquement
+input bool   InpShowInfo = true;       // Afficher les informations sur le graphique
 
 //--- Global variables
 datetime LastBarTime = 0;
-int      SARHandle;
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -49,13 +78,26 @@ int OnInit()
       return(INIT_PARAMETERS_INCORRECT);
    }
    
+   if(InpSuperTrendPeriod <= 0)
+   {
+      Print("Erreur: SuperTrend Period doit être positif");
+      return(INIT_PARAMETERS_INCORRECT);
+   }
+   
    // Initialize last bar time
    LastBarTime = Time[0];
    
-   Print("EA ParabolicSAR initialisé avec succès");
+   // Enable timer for info display
+   if(InpShowInfo)
+      EventSetTimer(1);
+   
+   Print("=== EA ParabolicSAR avec filtre SuperTrend initialisé ===");
    Print("SAR Step: ", InpSARStep, ", SAR Maximum: ", InpSARMaximum);
+   Print("SuperTrend Filter: ", (InpUseSuperTrendFilter ? "ACTIVÉ" : "DÉSACTIVÉ"));
+   Print("SuperTrend Period: ", InpSuperTrendPeriod, ", Multiplier: ", InpSuperTrendMultiplier);
    Print("Lot Size: ", InpLotSize, ", Magic Number: ", InpMagicNumber);
    Print("Fermeture sur signal opposé: ", (InpCloseOnOppositeSignal ? "Activée" : "Désactivée"));
+   Print("Stratégie: Trading contrarian - SAR opposé à SuperTrend");
    
    return(INIT_SUCCEEDED);
 }
@@ -65,6 +107,8 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
+   EventKillTimer();
+   Comment("");
    Print("EA ParabolicSAR arrêté. Raison: ", reason);
 }
 
@@ -82,7 +126,7 @@ void OnTick()
    }
    
    // Check if we have enough bars
-   if(Bars < 10)
+   if(Bars < 20)
       return;
    
    // Get Parabolic SAR values
@@ -96,17 +140,62 @@ void OnTick()
    double close_current = Close[1];
    double close_previous = Close[2];
    
-   // Determine trend direction
-   bool bullish_signal = false;
-   bool bearish_signal = false;
+   // Determine SAR signals
+   bool sar_bullish_signal = false;
+   bool sar_bearish_signal = false;
    
-   // Bullish signal: SAR below price and was above price previously
+   // SAR Bullish signal: SAR below price and was above price previously
    if(sar_current < close_current && sar_previous > close_previous)
-      bullish_signal = true;
+      sar_bullish_signal = true;
    
-   // Bearish signal: SAR above price and was below price previously
+   // SAR Bearish signal: SAR above price and was below price previously
    if(sar_current > close_current && sar_previous < close_previous)
-      bearish_signal = true;
+      sar_bearish_signal = true;
+   
+   // Get SuperTrend Histo values if filter is enabled
+   bool supertrend_bullish = false;
+   bool supertrend_bearish = false;
+   bool use_sar_buy = false;
+   bool use_sar_sell = false;
+   
+   if(InpUseSuperTrendFilter)
+   {
+      double st_up = iCustom(Symbol(), Period(), "SuperTrend Histo (experiment) 1.3", 
+                            PERIOD_CURRENT, InpSuperTrendPeriod, InpSuperTrendMultiplier, 
+                            InpMidPricePeriod, 0, false, false, true, false, false, false, "alert2.wav", 0, 1);
+      
+      double st_down = iCustom(Symbol(), Period(), "SuperTrend Histo (experiment) 1.3", 
+                              PERIOD_CURRENT, InpSuperTrendPeriod, InpSuperTrendMultiplier, 
+                              InpMidPricePeriod, 0, false, false, true, false, false, false, "alert2.wav", 1, 1);
+      
+      // SuperTrend direction
+      supertrend_bullish = (st_up != EMPTY_VALUE && st_up > 0);
+      supertrend_bearish = (st_down != EMPTY_VALUE && st_down > 0);
+      
+      // Contrarian logic: 
+      // Si SuperTrend haussier → Prendre seulement les SELL du SAR
+      // Si SuperTrend baissier → Prendre seulement les BUY du SAR
+      if(supertrend_bullish)
+      {
+         use_sar_sell = true;  // Prendre les signaux de vente SAR
+         use_sar_buy = false;
+      }
+      else if(supertrend_bearish)
+      {
+         use_sar_buy = true;   // Prendre les signaux d'achat SAR
+         use_sar_sell = false;
+      }
+   }
+   else
+   {
+      // Si pas de filtre SuperTrend, utiliser tous les signaux SAR
+      use_sar_buy = true;
+      use_sar_sell = true;
+   }
+   
+   // Final trading signals with filter
+   bool final_buy_signal = sar_bullish_signal && use_sar_buy;
+   bool final_sell_signal = sar_bearish_signal && use_sar_sell;
    
    // Check current positions
    int total_orders = OrdersTotal();
@@ -127,42 +216,45 @@ void OnTick()
       }
    }
    
-   // Trading logic with opposite signal closing option
-   if(bullish_signal)
+   // Trading logic with SuperTrend filter
+   if(final_buy_signal)
    {
       // Close sell positions if option is enabled
       if(InpCloseOnOppositeSignal && has_sell_position)
       {
          CloseAllPositions(OP_SELL);
-         Print("Positions SELL fermées suite au signal haussier");
+         Print("Positions SELL fermées suite au signal d'achat filtré");
       }
       
       // Open buy position if we don't have one
       if(!has_buy_position)
       {
+         string reason = InpUseSuperTrendFilter ? " (SuperTrend baissier + SAR haussier)" : " (SAR haussier)";
+         Print("Signal d'achat validé", reason);
          OpenPosition(OP_BUY);
       }
    }
-   else if(bearish_signal)
+   else if(final_sell_signal)
    {
       // Close buy positions if option is enabled
       if(InpCloseOnOppositeSignal && has_buy_position)
       {
          CloseAllPositions(OP_BUY);
-         Print("Positions BUY fermées suite au signal baissier");
+         Print("Positions BUY fermées suite au signal de vente filtré");
       }
       
       // Open sell position if we don't have one
       if(!has_sell_position)
       {
+         string reason = InpUseSuperTrendFilter ? " (SuperTrend haussier + SAR baissier)" : " (SAR baissier)";
+         Print("Signal de vente validé", reason);
          OpenPosition(OP_SELL);
       }
    }
    
-   // Alternative logic: Close on opposite signal even without new position
-   if(!bullish_signal && !bearish_signal && InpCloseOnOppositeSignal)
+   // Alternative logic: Close on opposite trend
+   if(!final_buy_signal && !final_sell_signal && InpCloseOnOppositeSignal)
    {
-      // Check if current trend has changed from positions
       string current_trend = GetCurrentTrendDirection();
       
       if(current_trend == "BAISSIER" && has_buy_position)
@@ -192,7 +284,7 @@ void OpenPosition(int order_type)
    {
       price = Ask;
       arrow_color = clrBlue;
-      comment = "SAR Buy";
+      comment = "SAR-ST Buy";
       
       if(InpUseStopLoss)
          sl = price - InpStopLoss * Point;
@@ -203,7 +295,7 @@ void OpenPosition(int order_type)
    {
       price = Bid;
       arrow_color = clrRed;
-      comment = "SAR Sell";
+      comment = "SAR-ST Sell";
       
       if(InpUseStopLoss)
          sl = price + InpStopLoss * Point;
@@ -308,15 +400,67 @@ string GetCurrentTrendDirection()
 }
 
 //+------------------------------------------------------------------+
+//| Get SuperTrend status                                            |
+//+------------------------------------------------------------------+
+string GetSuperTrendStatus()
+{
+   if(!InpUseSuperTrendFilter)
+      return "DÉSACTIVÉ";
+      
+   double st_up = iCustom(Symbol(), Period(), "SuperTrend Histo (experiment) 1.3", 
+                         PERIOD_CURRENT, InpSuperTrendPeriod, InpSuperTrendMultiplier, 
+                         InpMidPricePeriod, 0, false, false, true, false, false, false, "alert2.wav", 0, 1);
+   
+   double st_down = iCustom(Symbol(), Period(), "SuperTrend Histo (experiment) 1.3", 
+                           PERIOD_CURRENT, InpSuperTrendPeriod, InpSuperTrendMultiplier, 
+                           InpMidPricePeriod, 0, false, false, true, false, false, false, "alert2.wav", 1, 1);
+   
+   if(st_up != EMPTY_VALUE && st_up > 0)
+      return "HAUSSIER";
+   else if(st_down != EMPTY_VALUE && st_down > 0)
+      return "BAISSIER";
+   else
+      return "NEUTRE";
+}
+
+//+------------------------------------------------------------------+
+//| Get allowed SAR signals based on SuperTrend                     |
+//+------------------------------------------------------------------+
+string GetAllowedSignals()
+{
+   if(!InpUseSuperTrendFilter)
+      return "TOUS";
+      
+   string st_status = GetSuperTrendStatus();
+   
+   if(st_status == "HAUSSIER")
+      return "SELL uniquement";
+   else if(st_status == "BAISSIER")
+      return "BUY uniquement";
+   else
+      return "AUCUN";
+}
+
+//+------------------------------------------------------------------+
 //| Display information on chart                                     |
 //+------------------------------------------------------------------+
 void DisplayInfo()
 {
-   string info = "=== EA Parabolic SAR ===\n";
-   info += "Tendance actuelle: " + GetCurrentTrend() + "\n";
+   if(!InpShowInfo)
+      return;
+      
+   string info = "=== EA Parabolic SAR + SuperTrend Filter ===\n";
+   info += "Tendance SAR: " + GetCurrentTrend() + "\n";
+   info += "SuperTrend: " + GetSuperTrendStatus() + "\n";
+   info += "Signaux autorisés: " + GetAllowedSignals() + "\n";
+   info += "─────────────────────────────────\n";
    info += "SAR Step: " + DoubleToString(InpSARStep, 3) + "\n";
    info += "SAR Maximum: " + DoubleToString(InpSARMaximum, 3) + "\n";
+   info += "ST Period: " + IntegerToString(InpSuperTrendPeriod) + "\n";
+   info += "ST Multiplier: " + DoubleToString(InpSuperTrendMultiplier, 3) + "\n";
    info += "Lot Size: " + DoubleToString(InpLotSize, 2) + "\n";
+   info += "─────────────────────────────────\n";
+   info += "Filtre SuperTrend: " + (InpUseSuperTrendFilter ? "ACTIVÉ" : "DÉSACTIVÉ") + "\n";
    info += "Fermeture signal opposé: " + (InpCloseOnOppositeSignal ? "OUI" : "NON") + "\n";
    
    // Count current positions
@@ -333,6 +477,7 @@ void DisplayInfo()
       }
    }
    
+   info += "─────────────────────────────────\n";
    info += "Positions BUY: " + IntegerToString(buy_count) + "\n";
    info += "Positions SELL: " + IntegerToString(sell_count) + "\n";
    
@@ -340,7 +485,7 @@ void DisplayInfo()
 }
 
 //+------------------------------------------------------------------+
-//| Timer function (optional)                                        |
+//| Timer function                                                   |
 //+------------------------------------------------------------------+
 void OnTimer()
 {

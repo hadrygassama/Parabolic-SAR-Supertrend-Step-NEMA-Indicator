@@ -1,0 +1,40 @@
+# Exemples de configurations pour ParabolicSAR_EA
+
+## Configuration Conservative (Débutant)
+InpSARStep=0.02
+InpSARMaximum=0.2
+InpLotSize=0.01
+InpMagicNumber=12345
+InpSlippage=3
+InpUseStopLoss=true
+InpUseTakeProfit=true
+InpStopLoss=50
+InpTakeProfit=100
+InpTradeOnNewBar=true
+InpCloseOnOppositeSignal=true
+
+## Configuration Aggressive (Expérimenté)
+InpSARStep=0.03
+InpSARMaximum=0.3
+InpLotSize=0.1
+InpMagicNumber=12345
+InpSlippage=5
+InpUseStopLoss=false
+InpUseTakeProfit=false
+InpStopLoss=30
+InpTakeProfit=150
+InpTradeOnNewBar=false
+InpCloseOnOppositeSignal=true
+
+## Configuration Scalping (Très expérimenté)
+InpSARStep=0.04
+InpSARMaximum=0.4
+InpLotSize=0.05
+InpMagicNumber=12345
+InpSlippage=2
+InpUseStopLoss=true
+InpUseTakeProfit=true
+InpStopLoss=20
+InpTakeProfit=40
+InpTradeOnNewBar=false
+InpCloseOnOppositeSignal=true
